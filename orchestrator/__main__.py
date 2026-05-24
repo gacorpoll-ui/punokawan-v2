@@ -289,17 +289,40 @@ async def run_cycle(
     log["lot_size"] = decision.lot_size
 
     if decision.action == "EXECUTE":
-        print(f"\n  >>> EXECUTE: {decision.direction} {symbol} @ {decision.entry:.2f}")
-        print(f"  >>> Lot: {decision.lot_size} | SL: {decision.sl:.2f} | TP: {decision.tp:.2f}")
-        print(f"  >>> Score: {decision.score}/10 | R:R 1:{setup.rr_ratio:.1f} | Session: {session}")
+        # Fix lot size to broker constraints via MT5
+        fixed_lot = decision.lot_size
+        lot_info = {}
+        try:
+            lot_result = await call_tool(
+                MCPServers.METATRADER_EXT,
+                "tool_lot_fix",
+                {"lot_size": decision.lot_size, "symbol": symbol},
+            )
+            fixed_lot = lot_result.get("fixed_lot", decision.lot_size)
+            lot_info = lot_result.get("constraints", {})
+            if lot_result.get("warnings"):
+                for w in lot_result["warnings"]:
+                    print(f"  [LOTFIX] {w}")
+            print(f"  [LOTFIX] Raw: {decision.lot_size} → Fixed: {fixed_lot} "
+                  f"(min={lot_info.get('vol_min','?')} max={lot_info.get('vol_max','?')} "
+                  f"step={lot_info.get('vol_step','?')})")
+        except Exception as e:
+            print(f"  [LOTFIX] Failed: {e} — using raw lot {fixed_lot}")
 
-        # Write ai_directive.json for MT5 bridge
+        print(f"\n  >>> EXECUTE: {decision.direction} {symbol} @ {decision.entry:.2f}")
+        print(f"  >>> Lot: {fixed_lot} | SL: {decision.sl:.2f} | TP: {decision.tp:.2f}")
+        print(f"  >>> Score: {decision.score}/10 | R:R 1:{setup.rr_ratio:.1f} | Session: {session}")
+        if lot_info:
+            print(f"  >>> Pip value/lot: ${lot_info.get('pip_value_per_lot', '?')} | "
+                  f"Contract: {lot_info.get('contract_size', '?')}")
+
+        # Write ai_directive.json for MT5 bridge (with fixed lot)
         directive_written = write_directive(
             direction=decision.direction,
             entry=decision.entry,
             sl=decision.sl,
             tp=decision.tp,
-            lot=decision.lot_size,
+            lot=fixed_lot,
             score=decision.score,
             reasons=setup.reasons,
             warnings=decision.warnings,

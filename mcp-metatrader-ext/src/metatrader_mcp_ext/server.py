@@ -181,6 +181,167 @@ def tool_get_terminal_status(symbol: str = "XAUUSD") -> dict:
 
 
 @mcp.tool()
+def tool_lot_fix(
+    lot_size: float,
+    symbol: str = "XAUUSD",
+) -> dict:
+    """Fix lot size to comply with MT5 broker symbol constraints.
+
+    Validates and corrects: min lot, max lot, lot step rounding.
+    Uses live MT5 symbol info for the constraints.
+
+    Args:
+        lot_size: Raw/desired lot size (e.g., 0.123 → fixed to 0.12)
+        symbol: Trading symbol
+
+    Returns:
+        Fixed lot size with constraint details
+    """
+    mt5 = _get_mt5_client()
+    if mt5 is None:
+        # Fallback: use default XAUUSD constraints
+        return _lot_fix_fallback(lot_size)
+
+    try:
+        if not mt5.terminal_info():
+            mt5.initialize()
+
+        mt5.symbol_select(symbol, True)
+        info = mt5.symbol_info(symbol)
+
+        if info is None:
+            return _lot_fix_fallback(lot_size)
+
+        vol_min = float(info.volume_min)
+        vol_max = float(info.volume_max)
+        vol_step = float(info.volume_step)
+        contract_size = float(info.trade_contract_size)
+        tick_value = float(info.trade_tick_value)
+        tick_size = float(info.trade_tick_size)
+        point = float(info.point)
+        digits = int(info.digits)
+
+    except Exception:
+        return _lot_fix_fallback(lot_size)
+
+    raw = lot_size
+
+    # Calculate decimal places from vol_step
+    step_str = f"{vol_step:.10f}".rstrip('0')
+    if '.' in step_str:
+        step_decimals = len(step_str.split('.')[1])
+    else:
+        step_decimals = 0
+
+    # Round to nearest valid step
+    if vol_step > 0:
+        steps = round(raw / vol_step)
+        fixed = round(steps * vol_step, step_decimals)
+    else:
+        fixed = raw
+
+    # Clamp to min/max
+    fixed = max(vol_min, min(vol_max, fixed))
+
+    # Final rounding to step precision
+    fixed = round(fixed, step_decimals)
+
+    warnings = []
+    if abs(raw - fixed) > 0.0001:
+        if raw < vol_min:
+            warnings.append(f"Increased from {raw} to min {vol_min}")
+        elif raw > vol_max:
+            warnings.append(f"Reduced from {raw} to max {vol_max}")
+        else:
+            warnings.append(f"Rounded from {raw} to nearest step {vol_step}")
+
+    return {
+        "symbol": symbol,
+        "raw_lot": raw,
+        "fixed_lot": max(vol_min, round(fixed, 2)),
+        "warnings": warnings,
+        "constraints": {
+            "vol_min": vol_min,
+            "vol_max": vol_max,
+            "vol_step": vol_step,
+            "contract_size": contract_size,
+            "tick_value": round(tick_value, 4),
+            "point": point,
+            "digits": digits,
+            "pip_value_per_lot": round(contract_size * point, 2),
+        },
+    }
+
+
+def _lot_fix_fallback(lot_size: float) -> dict:
+    """Fallback lot fix with hardcoded XAUUSD constraints."""
+    vol_min, vol_max, vol_step = 0.01, 200.0, 0.01
+    raw = lot_size
+    steps = round(raw / vol_step)
+    fixed = steps * vol_step
+    fixed = max(vol_min, min(vol_max, fixed))
+    fixed = round(fixed, 2)
+    return {
+        "symbol": "XAUUSD",
+        "raw_lot": raw,
+        "fixed_lot": fixed,
+        "warnings": [f"Rounded from {raw} to step {vol_step}"] if raw != fixed else [],
+        "constraints": {
+            "vol_min": vol_min, "vol_max": vol_max, "vol_step": vol_step,
+            "contract_size": 100.0, "tick_value": 1.0, "point": 0.01, "digits": 2,
+            "pip_value_per_lot": 1.0,
+        },
+    }
+
+
+@mcp.tool()
+def tool_get_symbol_info(symbol: str = "XAUUSD") -> dict:
+    """Get complete MT5 symbol specification.
+
+    Returns all trading constraints: lot limits, contract size,
+    tick value, spread, swap rates, margin requirements.
+    """
+    mt5 = _get_mt5_client()
+    if mt5 is None:
+        return {"error": "MetaTrader5 package not available"}
+
+    try:
+        if not mt5.terminal_info():
+            mt5.initialize()
+
+        mt5.symbol_select(symbol, True)
+        info = mt5.symbol_info(symbol)
+
+        if info is None:
+            return {"error": f"Symbol {symbol} not found"}
+
+        return {
+            "symbol": info.name,
+            "description": info.description,
+            "digits": info.digits,
+            "point": info.point,
+            "spread": info.spread,
+            "spread_float": info.spread_float,
+            "volume_min": info.volume_min,
+            "volume_max": info.volume_max,
+            "volume_step": info.volume_step,
+            "volume_limit": info.volume_limit,
+            "contract_size": info.trade_contract_size,
+            "tick_value": info.trade_tick_value,
+            "tick_size": info.trade_tick_size,
+            "swap_long": info.swap_long,
+            "swap_short": info.swap_short,
+            "margin_initial": info.margin_initial,
+            "margin_maintenance": info.margin_maintenance,
+            "trade_mode": info.trade_mode,
+            "trade_calc_mode": info.trade_calc_mode,
+            "trade_allowed": bool(info.trade_mode != 0),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
 def tool_get_ohlcv_data(
     symbol: str = "XAUUSD",
     timeframe: str = "H1",
