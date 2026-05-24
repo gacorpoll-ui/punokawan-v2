@@ -29,7 +29,12 @@ from orchestrator.mcp_client import (
     get_lot_size,
 )
 from orchestrator.scoring_engine import MIN_SCORE_TO_TRADE, score_setup
-from orchestrator.decision_maker import consult_ai, rule_based_decision
+from orchestrator.decision_maker import (
+    build_sltp_ai_prompt,
+    consult_ai,
+    parse_sltp_response,
+    rule_based_decision,
+)
 from orchestrator.trading_presets import get_trading_config
 
 DIRECTIVE_PATH = r"C:\Users\Riri\Documents\ai_directive.json"
@@ -359,6 +364,58 @@ async def run_cycle(
         log["decision"] = "SKIP"
         log["reason"] = f"Score {setup.score} < {MIN_SCORE_TO_TRADE}"
         return log
+
+    # ── Optional: AI SL/TP suggestion ──────────────────────
+    tp_sl_mode = env.get("TP_SL_MODE", "DYNAMIC").upper().strip()
+    ai_sltp_reasoning = ""
+
+    if tp_sl_mode == "AI" and use_ai and api_key:
+        print("\n[AI SL/TP] Consulting AI for optimal SL/TP...")
+        try:
+            sltp_prompt = build_sltp_ai_prompt(
+                direction=setup.direction,
+                price=setup.entry,
+                analysis_data=analysis,
+                trading_config={
+                    "style": cfg.style,
+                    "primary_tf": cfg.primary_tf,
+                    "min_sl_points": cfg.min_sl_points,
+                    "max_sl_points": cfg.max_sl_points,
+                    "max_tp_points": cfg.max_tp_points,
+                    "risk_per_trade_pct": cfg.risk_per_trade_pct,
+                    "description": cfg.description,
+                },
+            )
+
+            # Use a lightweight AI call for SL/TP only
+            ai_sltp_response = await consult_ai(
+                setup, risk_summary={"overall_allowed": True}, analysis_data=analysis,
+                provider=ai_provider, api_key=api_key, custom_prompt=sltp_prompt,
+            )
+
+            ai_entry, ai_sl, ai_tp, ai_sltp_reasoning = parse_sltp_response(
+                ai_sltp_response, setup.entry, setup.sl, setup.tp
+            )
+
+            # Validate AI-suggested levels within style constraints
+            ai_sl_dist = abs(ai_entry - ai_sl)
+            ai_tp_dist = abs(ai_tp - ai_entry)
+
+            if cfg.min_sl_points <= ai_sl_dist <= cfg.max_sl_points and ai_tp_dist <= cfg.max_tp_points:
+                setup.entry = ai_entry
+                setup.sl = ai_sl
+                setup.tp = ai_tp
+                setup.rr_ratio = ai_tp_dist / ai_sl_dist if ai_sl_dist > 0 else 0
+                print(f"  [AI] Entry: {ai_entry:.2f} | SL: {ai_sl:.2f} ({ai_sl_dist:.1f} pts) | TP: {ai_tp:.2f} ({ai_tp_dist:.1f} pts)")
+                if ai_sltp_reasoning:
+                    print(f"  [AI] {ai_sltp_reasoning[:120]}")
+            else:
+                print(f"  [AI] SL/TP out of style range — using structural levels instead")
+                print(f"       AI SL: {ai_sl_dist:.1f} pts (range: {cfg.min_sl_points}-{cfg.max_sl_points})")
+        except Exception as e:
+            print(f"  [AI] SL/TP suggestion failed: {e} — using structural levels")
+    elif tp_sl_mode == "AI" and not use_ai:
+        print(f"  [AI SL/TP] AI mode requires --ai flag — using DYNAMIC structural levels")
 
     # ── Phase 3: Risk Validation ──────────────────────────
     print("\n[3/5] Risk validation...")

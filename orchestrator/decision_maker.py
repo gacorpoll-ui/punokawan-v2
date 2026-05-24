@@ -216,6 +216,99 @@ def _get_api_key(provider: str) -> str:
     return ""
 
 
+def build_sltp_ai_prompt(
+    direction: str, price: float, analysis_data: dict, trading_config: dict
+) -> str:
+    """Build a prompt for AI to suggest SL/TP based on trading style + market context.
+
+    The AI receives full market structure and style parameters,
+    then returns specific SL and TP values.
+    """
+    smc = analysis_data.get("smc", {})
+    ind_list = analysis_data.get("indicators", {}).get("results", [])
+
+    # Format indicators
+    ind_lines = []
+    for r in ind_list:
+        ind = r.get("indicators", {})
+        ind_lines.append(
+            f"  {r['timeframe']:4s} Close={r['last_close']} "
+            f"RSI={ind.get('rsi14','?')} ATR={ind.get('atr14','?')} "
+            f"EMA9={ind.get('ema9','?')}"
+        )
+
+    # Format SMC
+    obs = smc.get("order_blocks", [])
+    ob_lines = [f"  [{ob['type']}] {ob['high']:.2f}-{ob['low']:.2f}" for ob in obs[:6]]
+    fvgs = smc.get("fair_value_gaps", [])
+    fvg_lines = [f"  [{f['type']}] {f['high']:.2f}-{f['low']:.2f}" for f in fvgs[:6]]
+    sweeps = smc.get("liquidity_sweeps", [])
+    swp_lines = [f"  [{s['type']}] level={s['swept_level']:.2f} depth={s['pip_depth']}pips" for s in sweeps[:4]]
+
+    prompt = f"""You are an expert XAUUSD {trading_config.get('style', 'SCALPING')} trader. Suggest optimal SL and TP.
+
+## Trading Style
+- Style: {trading_config.get('style', 'SCALPING')}
+- Primary TF: {trading_config.get('primary_tf', 'M1')}
+- SL range: {trading_config.get('min_sl_points', 3)}-{trading_config.get('max_sl_points', 7)} price units
+- TP max: {trading_config.get('max_tp_points', 15)} price units
+- Risk/trade: {trading_config.get('risk_per_trade_pct', 10)}%
+- Description: {trading_config.get('description', '')}
+
+## Market Context
+- Direction: {direction}
+- Current Price: {price:.2f}
+- Market Bias: {smc.get('current_bias', 'N/A')}
+- CHoCH: {smc.get('choch_detected', False)}
+- BOS Levels: {smc.get('bos_levels', [])[:5]}
+
+## Indicators
+{chr(10).join(ind_lines) if ind_lines else 'No indicator data'}
+
+## Order Blocks (nearest to price)
+{chr(10).join(ob_lines) if ob_lines else 'None'}
+
+## Fair Value Gaps
+{chr(10).join(fvg_lines) if fvg_lines else 'None'}
+
+## Liquidity Sweeps
+{chr(10).join(swp_lines) if swp_lines else 'None'}
+
+## Daily Levels
+PDH={smc.get('daily_levels', {}).get('pdh', '?')} PDL={smc.get('daily_levels', {}).get('pdl', '?')}
+
+Respond with EXACTLY this JSON format (no other text):
+{{"entry": {price:.2f}, "sl": 0.00, "tp": 0.00, "reasoning": "one line explanation"}}
+
+Choose SL and TP based on:
+1. Nearest structural levels (OB, FVG, PDH/PDL, swing points)
+2. ATR for volatility-adjusted distance
+3. Trading style constraints
+4. SL must protect against noise (use ATR-based buffer)
+5. TP must target the nearest logical structural level"""
+    return prompt
+
+
+def parse_sltp_response(response: str, fallback_entry: float, fallback_sl: float, fallback_tp: float) -> tuple:
+    """Parse AI SL/TP response. Falls back to structural values if parsing fails."""
+    import json as _json
+    try:
+        # Extract JSON from response (may have markdown wrapping)
+        text = response.strip()
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start >= 0 and end > start:
+            data = _json.loads(text[start:end])
+            entry = float(data.get("entry", fallback_entry))
+            sl = float(data.get("sl", fallback_sl))
+            tp = float(data.get("tp", fallback_tp))
+            reasoning = data.get("reasoning", "")
+            return entry, sl, tp, reasoning
+    except Exception:
+        pass
+    return fallback_entry, fallback_sl, fallback_tp, ""
+
+
 def build_ai_prompt(setup: TradeSetup, risk_summary: dict, analysis_data: dict) -> str:
     """Build a prompt for AI trade consultation."""
     smc = analysis_data.get("smc", {})
@@ -260,10 +353,12 @@ async def consult_ai(
     analysis_data: dict,
     provider: str = "DEEPSEEK",
     api_key: str = "",
+    custom_prompt: str = "",
 ) -> str:
     """Consult external AI for trade decision — multi-provider support.
 
-    Providers: DEEPSEEK, CLAUDE, OPENAI, GEMINI
+    Providers: DEEPSEEK, CLAUDE, OPENAI, GEMINI, CUSTOM
+    Set custom_prompt to override the default decision prompt (for SL/TP, etc.)
     Falls back to rule-based approval if API unavailable or no key.
     """
     if not api_key:
@@ -283,7 +378,7 @@ async def consult_ai(
         cfg["url"] = custom_url
         cfg["model"] = custom_model
 
-    prompt = build_ai_prompt(setup, risk_summary, analysis_data)
+    prompt = custom_prompt if custom_prompt else build_ai_prompt(setup, risk_summary, analysis_data)
 
     try:
         import requests
