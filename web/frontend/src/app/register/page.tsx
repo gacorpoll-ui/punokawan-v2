@@ -1,11 +1,37 @@
 "use client"
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useState } from "react"
-import { TrendingUp, Mail, Lock, User, Eye, EyeOff, Check } from "lucide-react"
+import { TrendingUp, Mail, Lock, User, Eye, EyeOff, Check, Loader2 } from "lucide-react"
 
 export default function RegisterPage() {
+  const router = useRouter()
   const [showPw, setShowPw] = useState(false)
+  const [form, setForm] = useState({ name: "", email: "", password: "" })
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setError("")
+    try {
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || "Registration failed")
+      localStorage.setItem("token", data.access_token)
+      router.push("/dashboard")
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-navy p-4">
@@ -19,6 +45,7 @@ export default function RegisterPage() {
           <span className="text-2xl font-bold text-white">
             Puno<span className="gold-text">kawan</span>
           </span>
+          <span className="text-xs text-slate-600 ml-1">by Markaz-Arshy</span>
         </Link>
 
         <div className="glass-strong rounded-2xl p-8">
@@ -28,12 +55,16 @@ export default function RegisterPage() {
           <h1 className="text-2xl font-bold text-white mb-2">Create your account</h1>
           <p className="text-slate-400 text-sm mb-6">Start your 14-day free trial. No credit card required.</p>
 
-          <form className="space-y-4">
+          {error && (
+            <div className="bg-loss/10 border border-loss/30 text-loss text-sm rounded-xl p-3 mb-4">{error}</div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-slate-400 mb-1.5">Name</label>
               <div className="relative">
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
-                <input type="text" className="w-full bg-navy border border-slate-700 rounded-xl py-3 pl-10 pr-4 text-white placeholder-slate-600 focus:border-gold/50 focus:outline-none transition" placeholder="John Doe" />
+                <input type="text" value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="w-full bg-navy border border-slate-700 rounded-xl py-3 pl-10 pr-4 text-white placeholder-slate-600 focus:border-gold/50 focus:outline-none transition" placeholder="John Doe" />
               </div>
             </div>
 
@@ -41,7 +72,7 @@ export default function RegisterPage() {
               <label className="block text-sm font-medium text-slate-400 mb-1.5">Email</label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
-                <input type="email" className="w-full bg-navy border border-slate-700 rounded-xl py-3 pl-10 pr-4 text-white placeholder-slate-600 focus:border-gold/50 focus:outline-none transition" placeholder="you@email.com" />
+                <input type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} className="w-full bg-navy border border-slate-700 rounded-xl py-3 pl-10 pr-4 text-white placeholder-slate-600 focus:border-gold/50 focus:outline-none transition" placeholder="you@email.com" />
               </div>
             </div>
 
@@ -49,15 +80,15 @@ export default function RegisterPage() {
               <label className="block text-sm font-medium text-slate-400 mb-1.5">Password</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
-                <input type={showPw ? "text" : "password"} className="w-full bg-navy border border-slate-700 rounded-xl py-3 pl-10 pr-12 text-white placeholder-slate-600 focus:border-gold/50 focus:outline-none transition" placeholder="Min. 6 characters" />
+                <input type={showPw ? "text" : "password"} value={form.password} onChange={e => setForm({...form, password: e.target.value})} className="w-full bg-navy border border-slate-700 rounded-xl py-3 pl-10 pr-12 text-white placeholder-slate-600 focus:border-gold/50 focus:outline-none transition" placeholder="Min. 6 characters" />
                 <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-400">
                   {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
 
-            <button type="submit" className="w-full bg-gold hover:bg-gold/90 text-navy font-bold py-3 rounded-xl transition-all hover:scale-[1.02] gold-glow">
-              Start Free Trial
+            <button type="submit" disabled={loading} className="w-full bg-gold hover:bg-gold/90 text-navy font-bold py-3 rounded-xl transition-all hover:scale-[1.02] gold-glow disabled:opacity-50 disabled:cursor-not-allowed">
+              {loading ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : "Start Free Trial"}
             </button>
           </form>
 

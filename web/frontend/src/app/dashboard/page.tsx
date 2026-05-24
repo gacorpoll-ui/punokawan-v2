@@ -17,15 +17,19 @@ export default function DashboardPage() {
 
   // Fetch data on mount
   useEffect(() => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null
+    const headers: Record<string, string> = {}
+    if (token) headers["Authorization"] = `Bearer ${token}`
+
     const fetchData = async () => {
       try {
         const [sigRes, perfRes] = await Promise.all([
           fetch("/api/signals/public"),
-          fetch("/api/performance").catch(() => null),
+          fetch("/api/performance", { headers }).catch(() => null),
         ])
         const sig = await sigRes.json()
         setSignal(sig)
-        if (perfRes) {
+        if (perfRes && perfRes.ok) {
           const perf = await perfRes.json()
           setPerformance(perf)
         }
@@ -34,7 +38,7 @@ export default function DashboardPage() {
       }
     }
     fetchData()
-    const interval = setInterval(fetchData, 30000) // Refresh every 30s
+    const interval = setInterval(fetchData, 30000)
     return () => clearInterval(interval)
   }, [])
 
@@ -49,6 +53,7 @@ export default function DashboardPage() {
           <span className="text-lg font-bold text-white">
             Puno<span className="gold-text">kawan</span>
           </span>
+          <span className="text-[10px] text-slate-600 ml-1">by Markaz-Arshy</span>
         </Link>
 
         <nav className="space-y-2 flex-1">
@@ -87,6 +92,7 @@ export default function DashboardPage() {
               <TrendingUp className="w-4 h-4 text-navy" />
             </div>
             <span className="text-lg font-bold text-white">Punokawan</span>
+            <span className="text-[10px] text-slate-600 ml-1">by Markaz-Arshy</span>
           </Link>
           <button onClick={() => setMobileNav(!mobileNav)} className="text-white">
             {mobileNav ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}

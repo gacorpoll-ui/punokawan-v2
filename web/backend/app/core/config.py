@@ -23,7 +23,7 @@ _env = _load_env()
 
 @dataclass
 class Settings:
-    APP_NAME: str = "Punokawan V2 API"
+    APP_NAME: str = "Punokawan by Markaz-Arshy API"
     VERSION: str = "1.0.0"
     DEBUG: bool = True
 

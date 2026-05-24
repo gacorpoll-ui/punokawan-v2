@@ -28,6 +28,7 @@ export default function Navbar() {
           <span className="text-xl font-bold text-white">
             Puno<span className="gold-text">kawan</span>
           </span>
+          <span className="hidden sm:inline text-[10px] text-slate-600 ml-1.5 -mt-1">by Markaz-Arshy</span>
         </Link>
 
         {/* Desktop nav */}

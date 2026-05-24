@@ -2,13 +2,13 @@ import type { Metadata } from "next"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "Punokawan V2 — AI Gold Trading Signals",
+  title: "Punokawan by Markaz-Arshy — AI Gold Trading Signals",
   description:
-    "Professional XAUUSD trading signals powered by AI. 14-day free trial. Real-time SMC analysis, 8-dimension confluence scoring, consistent profits.",
-  keywords: "XAUUSD, gold trading, AI signals, forex, trading bot, SMC, smart money concepts",
+    "Professional XAUUSD trading signals powered by AI. 14-day free trial. Real-time SMC analysis, 8-dimension confluence scoring, consistent profits. Built by Markaz-Arshy.",
+  keywords: "XAUUSD, gold trading, AI signals, forex, trading bot, SMC, smart money concepts, Markaz-Arshy, Punokawan",
   openGraph: {
-    title: "Punokawan V2 — AI Gold Trading Signals",
-    description: "Professional XAUUSD trading signals powered by AI. Start your 14-day free trial.",
+    title: "Punokawan by Markaz-Arshy — AI Gold Trading Signals",
+    description: "Professional XAUUSD trading signals powered by AI. Start your 14-day free trial. Built by Markaz-Arshy.",
     type: "website",
   },
 }

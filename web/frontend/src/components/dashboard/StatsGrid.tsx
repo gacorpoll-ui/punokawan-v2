@@ -14,13 +14,20 @@ interface StatsProps {
 }
 
 export default function StatsGrid({ performance: p }: StatsProps) {
+  const wr = p?.win_rate ?? 0
+  const pf = p?.profit_factor ?? 0
+  const sr = p?.sharpe_ratio ?? 0
+  const np = p?.net_profit ?? 0
+  const tt = p?.total_trades ?? 0
+  const gp = p?.gross_profit ?? 0
+
   const stats = [
-    { icon: TrendingUp, label: "Win Rate", value: `${(p.win_rate * 100).toFixed(1)}%`, color: "text-profit", bg: "bg-profit/10" },
-    { icon: Target, label: "Profit Factor", value: p.profit_factor.toFixed(2), color: "text-blue-400", bg: "bg-blue-500/10" },
-    { icon: Activity, label: "Sharpe Ratio", value: p.sharpe_ratio.toFixed(2), color: "text-gold", bg: "bg-gold/10" },
-    { icon: DollarSign, label: "Net Profit", value: `$${p.net_profit.toFixed(0)}`, color: "text-profit", bg: "bg-profit/10" },
-    { icon: BarChart3, label: "Total Trades", value: String(p.total_trades), color: "text-white", bg: "bg-slate-500/10" },
-    { icon: Shield, label: "Gross Profit", value: `$${p.gross_profit.toFixed(0)}`, color: "text-profit", bg: "bg-profit/10" },
+    { icon: TrendingUp, label: "Win Rate", value: `${(wr * 100).toFixed(1)}%`, color: "text-profit", bg: "bg-profit/10" },
+    { icon: Target, label: "Profit Factor", value: pf.toFixed(2), color: "text-blue-400", bg: "bg-blue-500/10" },
+    { icon: Activity, label: "Sharpe Ratio", value: sr.toFixed(2), color: "text-gold", bg: "bg-gold/10" },
+    { icon: DollarSign, label: "Net Profit", value: `$${np.toFixed(0)}`, color: "text-profit", bg: "bg-profit/10" },
+    { icon: BarChart3, label: "Total Trades", value: String(tt), color: "text-white", bg: "bg-slate-500/10" },
+    { icon: Shield, label: "Gross Profit", value: `$${gp.toFixed(0)}`, color: "text-profit", bg: "bg-profit/10" },
   ]
 
   return (

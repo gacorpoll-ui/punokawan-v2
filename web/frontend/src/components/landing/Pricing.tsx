@@ -53,7 +53,7 @@ const plans = [
       "SLA guarantee",
     ],
     cta: "Contact Us",
-    href: "mailto:enterprise@punokawan.io",
+    href: "mailto:markaz-arshy@punokawan.io",
     highlighted: false,
   },
 ]

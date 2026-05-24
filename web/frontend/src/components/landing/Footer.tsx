@@ -14,10 +14,10 @@ export default function Footer() {
               <span className="text-lg font-bold text-white">
                 Puno<span className="gold-text">kawan</span>
               </span>
+              <span className="text-xs text-slate-600 ml-1">by Markaz-Arshy</span>
             </Link>
             <p className="text-sm text-slate-500 leading-relaxed">
-              AI-powered XAUUSD trading signals. Built for traders who demand precision.
-            </p>
+              AI-powered XAUUSD trading signals. Built for traders who demand precision. &copy; Markaz-Arshy.</p>
           </div>
 
           {[
@@ -42,7 +42,7 @@ export default function Footer() {
 
         <div className="border-t border-white/5 pt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="text-xs text-slate-600">
-            &copy; {new Date().getFullYear()} Punokawan V2. All rights reserved.
+            &copy; {new Date().getFullYear()} Punokawan by Markaz-Arshy. All rights reserved.
           </p>
           <p className="text-xs text-slate-600">
             Trading forex/commodities involves substantial risk of loss. Past performance does not guarantee future results.
