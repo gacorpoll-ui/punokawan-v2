@@ -78,8 +78,8 @@ def signal_history(
 
 
 @router.get("/performance")
-def performance(user: dict = Depends(get_current_user)):
-    """Get trading performance metrics."""
+def performance():
+    """Get trading performance metrics — public."""
     perf = get_performance_from_db()
     return JSONResponse(perf)
 
