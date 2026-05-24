@@ -36,7 +36,7 @@ ENV_PATH = r"D:\Punokawan V2\.env"
 
 
 def _load_env() -> dict:
-    """Load configuration from .env file."""
+    """Load configuration from .env file into dict + os.environ."""
     config = {}
     if os.path.exists(ENV_PATH):
         with open(ENV_PATH) as f:
@@ -44,7 +44,12 @@ def _load_env() -> dict:
                 line = line.strip()
                 if line and not line.startswith("#") and "=" in line:
                     key, _, val = line.partition("=")
-                    config[key.strip()] = val.strip()
+                    key = key.strip()
+                    val = val.strip()
+                    config[key] = val
+                    # Also set in os.environ for inter-module access
+                    if key not in os.environ or not os.environ[key]:
+                        os.environ[key] = val
     return config
 
 
@@ -375,7 +380,7 @@ async def run_cycle(
     # Optional AI consultation
     if use_ai and decision.action == "EXECUTE":
         print("  Consulting AI...")
-        ai_response = await consult_ai(setup, risk, analysis, api_key)
+        ai_response = await consult_ai(setup, risk, analysis, provider=ai_provider, api_key=api_key)
         decision.ai_opinion = ai_response
         print(f"  AI says: {ai_response[:80]}")
 
@@ -481,7 +486,9 @@ async def run_cycle(
 async def main_loop(interval: int = 300, use_ai: bool = False, force: bool = False):
     """Run continuous trading cycles."""
     env = _load_env()
-    api_key = env.get("DEEPSEEK_API_KEY", "") or os.environ.get("DEEPSEEK_API_KEY", "")
+    ai_provider = env.get("AI_PROVIDER", "DEEPSEEK").upper().strip()
+    key_map = {"DEEPSEEK":"DEEPSEEK_API_KEY","CLAUDE":"ANTHROPIC_API_KEY","OPENAI":"OPENAI_API_KEY","GEMINI":"GEMINI_API_KEY","CUSTOM":"CUSTOM_API_KEY"}
+    api_key = env.get(key_map.get(ai_provider, "DEEPSEEK_API_KEY"), "") or os.environ.get(key_map.get(ai_provider, "DEEPSEEK_API_KEY"), "")
 
     print("=" * 60)
     print("  PUNOKAWAN V2 — Autonomous Trading System")
@@ -516,9 +523,15 @@ if __name__ == "__main__":
 
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-    # Read API key from .env (shared between loop and single cycle)
+    # Read AI provider + API key from .env
     env = _load_env()
-    api_key = env.get("DEEPSEEK_API_KEY", "") or os.environ.get("DEEPSEEK_API_KEY", "")
+    ai_provider = env.get("AI_PROVIDER", "DEEPSEEK").upper().strip()
+    key_map = {"DEEPSEEK":"DEEPSEEK_API_KEY","CLAUDE":"ANTHROPIC_API_KEY","OPENAI":"OPENAI_API_KEY","GEMINI":"GEMINI_API_KEY","CUSTOM":"CUSTOM_API_KEY"}
+    api_key = env.get(key_map.get(ai_provider, "DEEPSEEK_API_KEY"), "") or os.environ.get(key_map.get(ai_provider, "DEEPSEEK_API_KEY"), "")
+
+    if args.ai and not api_key:
+        print(f"[WARN] AI mode enabled but no API key found for provider '{ai_provider}'")
+        print(f"       Set {key_map.get(ai_provider, 'API_KEY')} in .env")
 
     if args.loop > 0:
         asyncio.run(main_loop(interval=args.loop, use_ai=args.ai, force=args.force))

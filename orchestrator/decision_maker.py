@@ -162,8 +162,62 @@ def rule_based_decision(
     )
 
 
+# ── Multi-Provider AI Configuration ──────────────────────────
+
+PROVIDERS = {
+    "DEEPSEEK": {
+        "url": "https://api.deepseek.com/v1/chat/completions",
+        "model": "deepseek-chat",
+        "header_key": "Authorization",
+        "header_prefix": "Bearer ",
+    },
+    "CLAUDE": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "model": "claude-sonnet-4-20250514",
+        "header_key": "x-api-key",
+        "header_prefix": "",
+        "version": "2023-06-01",
+    },
+    "OPENAI": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "model": "gpt-4o",
+        "header_key": "Authorization",
+        "header_prefix": "Bearer ",
+    },
+    "GEMINI": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+        "model": "gemini-2.0-flash",
+        "header_key": "x-goog-api-key",
+        "header_prefix": "",
+    },
+    "CUSTOM": {
+        "url": "",  # Set via CUSTOM_API_URL in .env
+        "model": "",  # Set via CUSTOM_MODEL in .env
+        "header_key": "Authorization",
+        "header_prefix": "Bearer ",
+    },
+}
+
+
+def _get_api_key(provider: str) -> str:
+    """Get API key for the given provider from .env."""
+    import os
+
+    key_map = {
+        "DEEPSEEK": "DEEPSEEK_API_KEY",
+        "CLAUDE": "ANTHROPIC_API_KEY",
+        "OPENAI": "OPENAI_API_KEY",
+        "GEMINI": "GEMINI_API_KEY",
+    }
+    env_var = key_map.get(provider, "")
+    # Try env file first, then OS env
+    if env_var:
+        return os.environ.get(env_var, "")
+    return ""
+
+
 def build_ai_prompt(setup: TradeSetup, risk_summary: dict, analysis_data: dict) -> str:
-    """Build a prompt for AI trade consultation (DeepSeek/Claude)."""
+    """Build a prompt for AI trade consultation."""
     smc = analysis_data.get("smc", {})
 
     prompt = f"""You are an expert XAUUSD scalping analyst. Review this trade setup:
@@ -204,42 +258,85 @@ async def consult_ai(
     setup: TradeSetup,
     risk_summary: dict,
     analysis_data: dict,
+    provider: str = "DEEPSEEK",
     api_key: str = "",
 ) -> str:
-    """Consult external AI for trade decision.
+    """Consult external AI for trade decision — multi-provider support.
 
-    Uses DeepSeek API. Falls back to rule-based if API unavailable.
+    Providers: DEEPSEEK, CLAUDE, OPENAI, GEMINI
+    Falls back to rule-based approval if API unavailable or no key.
     """
     if not api_key:
-        return "APPROVE"  # Default: trust the rules
+        return "APPROVE"
+
+    cfg = dict(PROVIDERS.get(provider.upper(), {}))
+    if not cfg:
+        return f"APPROVE (unknown provider: {provider})"
+
+    # Custom provider: read URL and model from .env
+    if provider.upper() == "CUSTOM":
+        import os
+        custom_url = os.environ.get("CUSTOM_API_URL", "")
+        custom_model = os.environ.get("CUSTOM_MODEL", "gpt-4o")
+        if not custom_url:
+            return "APPROVE (CUSTOM_API_URL not set in .env)"
+        cfg["url"] = custom_url
+        cfg["model"] = custom_model
 
     prompt = build_ai_prompt(setup, risk_summary, analysis_data)
 
     try:
         import requests
 
-        response = requests.post(
-            "https://api.deepseek.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "deepseek-chat",
+        headers = {"Content-Type": "application/json"}
+        headers[cfg["header_key"]] = cfg["header_prefix"] + api_key
+
+        if cfg.get("version"):
+            headers["anthropic-version"] = cfg["version"]
+
+        if provider.upper() == "CLAUDE":
+            # Anthropic Messages API format
+            body = {
+                "model": cfg["model"],
+                "max_tokens": 100,
+                "temperature": 0.3,
+                "system": "You are a professional XAUUSD scalping analyst. Respond with exactly one word: APPROVE, MODIFY, or REJECT.",
+                "messages": [{"role": "user", "content": prompt}],
+            }
+        elif provider.upper() == "GEMINI":
+            # Google Gemini API format
+            body = {
+                "contents": [{
+                    "parts": [{"text": f"You are a professional XAUUSD scalping analyst. Respond with exactly one word: APPROVE, MODIFY, or REJECT.\n\n{prompt}"}]
+                }],
+                "generationConfig": {"maxOutputTokens": 50, "temperature": 0.3},
+            }
+        else:
+            # OpenAI-compatible format (DeepSeek, OpenAI, and others)
+            body = {
+                "model": cfg["model"],
                 "messages": [
-                    {"role": "system", "content": "You are a professional XAUUSD scalping analyst. Respond concisely."},
+                    {"role": "system", "content": "You are a professional XAUUSD scalping analyst. Respond with exactly one word: APPROVE, MODIFY, or REJECT."},
                     {"role": "user", "content": prompt},
                 ],
                 "max_tokens": 100,
                 "temperature": 0.3,
-            },
-            timeout=15,
-        )
+            }
+
+        response = requests.post(cfg["url"], headers=headers, json=body, timeout=15)
 
         if response.status_code == 200:
-            content = response.json()["choices"][0]["message"]["content"].strip()
+            data = response.json()
+            if provider.upper() == "CLAUDE":
+                content = data["content"][0]["text"].strip()
+            elif provider.upper() == "GEMINI":
+                content = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            else:
+                content = data["choices"][0]["message"]["content"].strip()
             return content
-    except Exception:
-        pass
+        else:
+            print(f"  [AI] {provider} error: {response.status_code} {response.text[:100]}")
+    except Exception as e:
+        print(f"  [AI] {provider} exception: {e}")
 
-    return "APPROVE"  # Fallback to rule-based approval
+    return "APPROVE"
