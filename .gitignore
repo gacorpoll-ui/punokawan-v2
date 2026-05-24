@@ -22,6 +22,11 @@ logs/
 .vscode/
 .idea/
 
+# Frontend build
+web/frontend/.next/
+web/frontend/node_modules/
+web/frontend/.turbo/
+
 # OS
 Thumbs.db
 Desktop.ini
