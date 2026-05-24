@@ -30,6 +30,7 @@ from orchestrator.mcp_client import (
 )
 from orchestrator.scoring_engine import MIN_SCORE_TO_TRADE, score_setup
 from orchestrator.decision_maker import consult_ai, rule_based_decision
+from orchestrator.trading_presets import get_trading_config
 
 DIRECTIVE_PATH = r"C:\Users\Riri\Documents\ai_directive.json"
 ENV_PATH = r"D:\Punokawan V2\.env"
@@ -249,15 +250,24 @@ async def run_cycle(
     t0 = time.time()
     session = get_current_session()
 
+    # Load trading style config
+    env = _load_env()
+    cfg = get_trading_config(env)
+
     # Auto-detect symbol from MT5 account type
     symbol = await detect_symbol()
+    mt5_path = env.get("MT5_PATH", "")
 
     log = {"symbol": symbol, "timestamp": datetime.now().isoformat(), "session": session}
 
     print()
     print("=" * 60)
     print(f"  PUNOKAWAN V2 — Trading Cycle — {datetime.now().strftime('%H:%M:%S')}")
-    print(f"  Session: {session} | Symbol: {symbol}")
+    print(f"  Style: {cfg.style:10s} | Session: {session:8s} | Symbol: {symbol}")
+    print(f"  TF: {cfg.primary_tf:4s} | Score min: {cfg.min_confluence_score} | "
+          f"SL: {cfg.min_sl_points}-{cfg.max_sl_points} | TP max: {cfg.max_tp_points}")
+    if mt5_path:
+        print(f"  MT5: {mt5_path}")
     print("=" * 60)
 
     # Session check

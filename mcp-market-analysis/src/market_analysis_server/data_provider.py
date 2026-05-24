@@ -76,7 +76,13 @@ def fetch_ohlcv_from_mt5(
 
     # Try to connect if not already
     if not mt5.terminal_info():
-        if not mt5.initialize():
+        import os
+        mt5_path = os.environ.get("MT5_PATH", "")
+        if mt5_path and os.path.exists(mt5_path):
+            init_args = {"path": mt5_path}
+        else:
+            init_args = {}
+        if not mt5.initialize(**init_args):
             return OHLCVResult(
                 symbol=symbol, timeframe=timeframe,
                 error=f"MT5 initialize failed: {mt5.last_error()}",

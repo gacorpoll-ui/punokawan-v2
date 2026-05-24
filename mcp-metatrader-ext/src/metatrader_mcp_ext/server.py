@@ -21,12 +21,36 @@ mcp = FastMCP("metatrader-extended")
 
 
 def _get_mt5_client():
-    """Lazy-import the MT5 client from existing server."""
+    """Lazy-import the MT5 client. Uses MT5_PATH from env if set."""
     try:
+        import os
         import MetaTrader5 as mt5
+
+        # Read MT5 path from .env (loaded into os.environ by orchestrator)
+        mt5_path = os.environ.get("MT5_PATH", "")
+        if mt5_path and os.path.exists(mt5_path):
+            # Store for later initialize calls
+            os.environ["_MT5_PATH_RESOLVED"] = mt5_path
+
         return mt5
     except ImportError:
         return None
+
+
+def _init_mt5():
+    """Initialize MT5 with custom path if configured."""
+    mt5 = _get_mt5_client()
+    if mt5 is None:
+        return None
+    import os
+    path = os.environ.get("_MT5_PATH_RESOLVED", "") or os.environ.get("MT5_PATH", "")
+    if path and os.path.exists(path):
+        if not mt5.terminal_info():
+            mt5.initialize(path=path)
+    else:
+        if not mt5.terminal_info():
+            mt5.initialize()
+    return mt5
 
 
 @mcp.tool()
