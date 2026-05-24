@@ -139,11 +139,15 @@ def score_setup(analysis_data: dict) -> TradeSetup:
     else:
         reasons.append("Multi-TF not aligned (+0)")
 
-    # ── 4. Clean R:R (+2) ────────────────────────────────────
+    # ── 4. Clean R:R (+2) + TP quality bonus ──────────────
     h1_atr = h1.get("indicators", {}).get("atr14", 0) if h1 else 0
-    entry, sl, tp = _calculate_levels(direction, price, smc, nearest_demand, nearest_supply, atr=h1_atr)
+    tp_mode = analysis_data.get("tp_mode", "DYNAMIC")
+    entry, sl, tp, tp_source = _calculate_levels(
+        direction, price, smc, nearest_demand, nearest_supply,
+        atr=h1_atr, tp_mode=tp_mode,
+    )
 
-    if entry and sl and tp and sl > 0:
+    if entry and sl and tp and tp_source and sl > 0:
         risk = abs(entry - sl)
         reward = abs(tp - entry)
         rr = reward / risk if risk > 0 else 0
@@ -158,10 +162,17 @@ def score_setup(analysis_data: dict) -> TradeSetup:
             rr = abs(tp - entry) / risk
 
         if rr >= MIN_RR_RATIO:
-            score += CLEAN_RR
-            reasons.append(f"Clean R:R 1:{rr:.1f} (SL:{sl:.2f} TP:{tp:.2f}) (+{CLEAN_RR:.0f})")
+            # TP quality: structural TP gets full +2, default gets +1
+            if tp_source and tp_source != "DEFAULT":
+                score += CLEAN_RR
+                reasons.append(f"Clean R:R 1:{rr:.1f} SL:{sl:.2f} TP:{tp:.2f} [{tp_source}] (+{CLEAN_RR:.0f})")
+            else:
+                score += 1.0
+                reasons.append(f"Fixed R:R 1:{rr:.1f} — no structural target, reduced (+1)")
         else:
             reasons.append(f"Poor R:R 1:{rr:.1f} (+0)")
+    elif tp_mode == "DYNAMIC" and not tp_source:
+        reasons.append(f"No structural TP found — DYNAMIC mode requires clear target (+0)")
     else:
         reasons.append("Cannot calculate valid SL/TP (+0)")
 
@@ -349,11 +360,16 @@ def _score_sweeps(sweeps: list, direction: str) -> float:
 
 def _calculate_levels(direction: str, price: float, smc: dict,
                       nearest_demand: dict, nearest_supply: dict,
-                      atr: float = 0) -> tuple:
+                      atr: float = 0, tp_mode: str = "DYNAMIC") -> tuple:
     """Calculate entry, SL, and TP from structural levels.
 
-    Uses ATR-based minimum SL when available.
-    SL = max(structural_level, ATR * 0.5, MIN_SL_POINTS)
+    TP behavior:
+      DYNAMIC: TP always from nearest structural level. If none found,
+               returns tp=None (trade needs clear target).
+      FIXED:   Falls back to default distance if no structural level.
+
+    Returns: (entry, sl, tp, tp_source)
+      tp_source: "OB", "FVG", "PDH/PDL", "BOS", "SWING", "DEFAULT", None
     """
     entry = price
     sl = 0
@@ -368,6 +384,8 @@ def _calculate_levels(direction: str, price: float, smc: dict,
     pdh = daily.get("pdh", 0)
     pdl = daily.get("pdl", 0)
 
+    tp_source = None  # Track where TP came from
+
     if direction == "BUY":
         # SL: below nearest demand OB, or below PDL, or ATR-based
         if nearest_demand:
@@ -377,32 +395,40 @@ def _calculate_levels(direction: str, price: float, smc: dict,
         else:
             sl = price - dynamic_min_sl
 
-        # Ensure minimum SL distance (ATR-adjusted)
         if sl >= price - dynamic_min_sl:
             sl = price - dynamic_min_sl
 
-        # TP: nearest supply OB, PDH, or FVG above
-        targets = []
-        if nearest_supply and nearest_supply["low"] > price + 2.0:
-            targets.append(nearest_supply["low"])
-        if pdh and pdh > price + 5.0:
-            targets.append(pdh)
+        # TP: nearest structural level above price
+        targets = {}
+        if nearest_supply and nearest_supply["low"] > price + dynamic_min_sl:
+            targets["OB"] = nearest_supply["low"]
+        if pdh and pdh > price + dynamic_min_sl:
+            targets["PDH"] = pdh
 
         for fvg in smc.get("fair_value_gaps", []):
-            if fvg.get("type") == "BISI" and fvg["low"] > price + 2.0:
-                targets.append(fvg["low"])
+            if fvg.get("type") == "BISI" and fvg["low"] > price + dynamic_min_sl:
+                targets["FVG"] = fvg["low"]
+                break  # Nearest FVG
 
-        for b in smc.get("bos_levels", []):
-            if b > price + 2.0:
-                targets.append(b)
+        for b in sorted(smc.get("bos_levels", [])):
+            if b > price + dynamic_min_sl:
+                targets["BOS"] = b
+                break  # Nearest BOS
 
+        # Pick nearest structural target
         if targets:
-            tp = min(targets)
+            tp_source = min(targets, key=targets.get)
+            tp = targets[tp_source]
+        elif tp_mode == "FIXED":
+            tp = price + (dynamic_min_sl * 2.0)
+            tp_source = "DEFAULT"
         else:
-            tp = price + (dynamic_min_sl * 2.0)  # Default 1:2 RR
+            # DYNAMIC: no structural target = no trade (tp stays 0)
+            return entry, sl, 0, None
 
-        if tp <= price + dynamic_min_sl:
-            tp = price + MAX_TP_POINTS * 0.6
+        # Cap to max TP
+        if tp > price + MAX_TP_POINTS:
+            tp = price + MAX_TP_POINTS
 
     else:  # SELL
         # SL: above nearest supply OB, or above PDH
@@ -416,38 +442,40 @@ def _calculate_levels(direction: str, price: float, smc: dict,
         if sl <= price + dynamic_min_sl:
             sl = price + dynamic_min_sl
 
-        # TP: nearest demand OB, PDL, or FVG below
-        targets = []
-        if nearest_demand and nearest_demand["high"] < price - 2.0:
-            targets.append(nearest_demand["high"])
-        if pdl and pdl < price - 5.0:
-            targets.append(pdl)
+        # TP: nearest structural level below price
+        targets = {}
+        if nearest_demand and nearest_demand["high"] < price - dynamic_min_sl:
+            targets["OB"] = nearest_demand["high"]
+        if pdl and pdl < price - dynamic_min_sl:
+            targets["PDL"] = pdl
 
         for fvg in smc.get("fair_value_gaps", []):
-            if fvg.get("type") == "SIBI" and fvg["high"] < price - 2.0:
-                targets.append(fvg["high"])
+            if fvg.get("type") == "SIBI" and fvg["high"] < price - dynamic_min_sl:
+                targets["FVG"] = fvg["high"]
+                break
 
-        for b in smc.get("bos_levels", []):
-            if b < price - 2.0:
-                targets.append(b)
+        for b in sorted(smc.get("bos_levels", []), reverse=True):
+            if b < price - dynamic_min_sl:
+                targets["BOS"] = b
+                break
 
         if targets:
-            tp = max(targets)
-        else:
+            tp_source = max(targets, key=targets.get)
+            tp = targets[tp_source]
+        elif tp_mode == "FIXED":
             tp = price - (dynamic_min_sl * 2.0)
+            tp_source = "DEFAULT"
+        else:
+            return entry, sl, 0, None
 
-        if tp >= price - dynamic_min_sl:
-            tp = price - MAX_TP_POINTS * 0.6
+        if tp < price - MAX_TP_POINTS:
+            tp = price - MAX_TP_POINTS
 
-    # Clamp SL and TP
+    # Clamp SL
     sl_dist = abs(entry - sl)
     if sl_dist > MAX_SL_POINTS:
         sl = entry - MAX_SL_POINTS if direction == "BUY" else entry + MAX_SL_POINTS
     elif sl_dist < dynamic_min_sl:
         sl = entry - dynamic_min_sl if direction == "BUY" else entry + dynamic_min_sl
 
-    tp_dist = abs(tp - entry)
-    if tp_dist > MAX_TP_POINTS:
-        tp = entry + MAX_TP_POINTS if direction == "BUY" else entry - MAX_TP_POINTS
-
-    return entry, sl, tp
+    return entry, sl, tp, tp_source

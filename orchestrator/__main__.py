@@ -330,6 +330,8 @@ async def run_cycle(
 
     # ── Phase 2: Scoring ──────────────────────────────────
     print("\n[2/5] Scoring setup...")
+    # Pass TP mode from env into analysis for scoring engine
+    analysis["tp_mode"] = env.get("TP_MODE", "DYNAMIC").upper().strip()
     setup = score_setup(analysis)
 
     direction_str = setup.direction.replace("BUY", "LONG").replace("SELL", "SHORT")
