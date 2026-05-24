@@ -13,8 +13,9 @@ logs/
 *.db-journal
 *.db-wal
 
-# Environment
+# Environment (secrets)
 .env
+# .env.example is tracked — copy to .env and configure
 *.flag
 
 # IDE

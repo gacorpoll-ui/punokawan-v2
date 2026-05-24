@@ -32,6 +32,100 @@ from orchestrator.scoring_engine import MIN_SCORE_TO_TRADE, score_setup
 from orchestrator.decision_maker import consult_ai, rule_based_decision
 
 DIRECTIVE_PATH = r"C:\Users\Riri\Documents\ai_directive.json"
+ENV_PATH = r"D:\Punokawan V2\.env"
+
+
+def _load_env() -> dict:
+    """Load configuration from .env file."""
+    config = {}
+    if os.path.exists(ENV_PATH):
+        with open(ENV_PATH) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, _, val = line.partition("=")
+                    config[key.strip()] = val.strip()
+    return config
+
+
+def get_lot_config() -> dict:
+    """Read lot sizing config from .env file.
+
+    Returns dict with:
+        mode: FIXED, RISK_PCT, or KELLY
+        fixed_lot: lot size for FIXED mode
+        risk_pct: risk % for RISK_PCT mode
+    """
+    env = _load_env()
+    mode = env.get("LOT_MODE", "FIXED").upper().strip()
+    fixed_lot = float(env.get("FIXED_LOT_SIZE", "0.05"))
+    risk_pct = float(env.get("RISK_PER_TRADE_PCT", "1.5"))
+    return {"mode": mode, "fixed_lot": fixed_lot, "risk_pct": risk_pct}
+
+
+async def detect_symbol() -> str:
+    """Auto-detect trading symbol based on MT5 account type.
+
+    Checks account currency from MT5 terminal:
+    - Cent account (USC, EURc, etc.) -> appends 'c' suffix
+    - USD account -> standard symbol
+
+    Falls back to SYMBOL from .env if MT5 not available.
+    """
+    env = _load_env()
+    symbol = env.get("SYMBOL", "XAUUSD")
+    account_type = env.get("ACCOUNT_TYPE", "AUTO").upper()
+
+    if account_type != "AUTO":
+        # Manual override: respect user setting
+        print(f"  [SYMBOL] Manual: {symbol} (ACCOUNT_TYPE={account_type})")
+        return symbol
+
+    # Try to detect from MT5
+    try:
+        import MetaTrader5 as mt5
+        if not mt5.terminal_info():
+            mt5.initialize()
+        info = mt5.account_info()
+        if info:
+            currency = info.currency
+            print(f"  [SYMBOL] Account currency: {currency} | Balance: ${info.balance:.0f}")
+            if currency.upper() in ("USC", "USDC", "CENT"):
+                detected = symbol + "c" if not symbol.endswith("c") else symbol
+                print(f"  [SYMBOL] Cent account detected -> {detected}")
+                return detected
+            else:
+                # USD or other standard account — use base symbol without suffix
+                clean = symbol.rstrip("c")
+                print(f"  [SYMBOL] Standard account -> {clean}")
+                return clean
+    except Exception as e:
+        print(f"  [SYMBOL] MT5 detect failed: {e}")
+
+    print(f"  [SYMBOL] Using env: {symbol}")
+    return symbol
+
+
+def calculate_lot(mode: str, fixed_lot: float, risk_pct: float,
+                  balance: float, sl_points: float,
+                  contract_size: float = 100.0, point: float = 0.01) -> float:
+    """Calculate lot size based on mode.
+
+    FIXED: use exact fixed_lot from env
+    RISK_PCT: risk % of balance based on SL distance
+    KELLY: placeholder (handled by metatrader-ext)
+    """
+    if mode == "FIXED":
+        return fixed_lot
+    elif mode == "RISK_PCT":
+        if sl_points <= 0:
+            return fixed_lot
+        risk_amount = balance * (risk_pct / 100)
+        pip_value_per_lot = contract_size * point
+        lot = risk_amount / (sl_points * pip_value_per_lot)
+        return round(lot, 2)
+    else:  # KELLY — handled by optimize_lot_size tool
+        return fixed_lot
 
 # Session trading hours (UTC)
 SESSIONS = {
@@ -149,6 +243,10 @@ async def run_cycle(
     """
     t0 = time.time()
     session = get_current_session()
+
+    # Auto-detect symbol from MT5 account type
+    symbol = await detect_symbol()
+
     log = {"symbol": symbol, "timestamp": datetime.now().isoformat(), "session": session}
 
     print()
@@ -286,27 +384,42 @@ async def run_cycle(
             decision.warnings.append("AI rejected the trade")
 
     log["decision"] = decision.action
-    log["lot_size"] = decision.lot_size
+
+    # ── Calculate lot from env config ──────────────────────
+    lot_cfg = get_lot_config()
+    sl_points = abs(setup.entry - setup.sl)
+    env_lot = calculate_lot(
+        mode=lot_cfg["mode"],
+        fixed_lot=lot_cfg["fixed_lot"],
+        risk_pct=lot_cfg["risk_pct"],
+        balance=balance,
+        sl_points=sl_points,
+    )
+    print(f"\n  [LOT] Mode: {lot_cfg['mode']} | Raw: {env_lot} | SL: {sl_points:.1f} pts")
+
+    log["lot_size"] = env_lot
+    log["lot_mode"] = lot_cfg["mode"]
 
     if decision.action == "EXECUTE":
         # Fix lot size to broker constraints via MT5
-        fixed_lot = decision.lot_size
+        raw_lot = env_lot
         lot_info = {}
         try:
             lot_result = await call_tool(
                 MCPServers.METATRADER_EXT,
                 "tool_lot_fix",
-                {"lot_size": decision.lot_size, "symbol": symbol},
+                {"lot_size": raw_lot, "symbol": symbol},
             )
-            fixed_lot = lot_result.get("fixed_lot", decision.lot_size)
+            fixed_lot = lot_result.get("fixed_lot", raw_lot)
             lot_info = lot_result.get("constraints", {})
             if lot_result.get("warnings"):
                 for w in lot_result["warnings"]:
                     print(f"  [LOTFIX] {w}")
-            print(f"  [LOTFIX] Raw: {decision.lot_size} → Fixed: {fixed_lot} "
+            print(f"  [LOTFIX] Raw: {raw_lot} -> Fixed: {fixed_lot} "
                   f"(min={lot_info.get('vol_min','?')} max={lot_info.get('vol_max','?')} "
                   f"step={lot_info.get('vol_step','?')})")
         except Exception as e:
+            fixed_lot = raw_lot
             print(f"  [LOTFIX] Failed: {e} — using raw lot {fixed_lot}")
 
         print(f"\n  >>> EXECUTE: {decision.direction} {symbol} @ {decision.entry:.2f}")
