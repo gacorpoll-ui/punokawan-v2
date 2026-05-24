@@ -14,7 +14,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import settings
-from .routers import auth_router, signal_router
+from .routers import admin_router, auth_router, signal_router
 from .services.websocket_manager import ws_manager
 
 
@@ -49,6 +49,7 @@ app.add_middleware(
 # Routers
 app.include_router(auth_router.router)
 app.include_router(signal_router.router)
+app.include_router(admin_router.router)
 
 
 # WebSocket endpoint
