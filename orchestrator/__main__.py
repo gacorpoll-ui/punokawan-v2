@@ -480,7 +480,8 @@ async def run_cycle(
 
 async def main_loop(interval: int = 300, use_ai: bool = False, force: bool = False):
     """Run continuous trading cycles."""
-    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+    env = _load_env()
+    api_key = env.get("DEEPSEEK_API_KEY", "") or os.environ.get("DEEPSEEK_API_KEY", "")
 
     print("=" * 60)
     print("  PUNOKAWAN V2 — Autonomous Trading System")
@@ -515,7 +516,11 @@ if __name__ == "__main__":
 
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+    # Read API key from .env (shared between loop and single cycle)
+    env = _load_env()
+    api_key = env.get("DEEPSEEK_API_KEY", "") or os.environ.get("DEEPSEEK_API_KEY", "")
+
     if args.loop > 0:
         asyncio.run(main_loop(interval=args.loop, use_ai=args.ai, force=args.force))
     else:
-        asyncio.run(run_cycle(symbol=args.symbol, use_ai=args.ai, force=args.force))
+        asyncio.run(run_cycle(symbol=args.symbol, use_ai=args.ai, force=args.force, api_key=api_key))
