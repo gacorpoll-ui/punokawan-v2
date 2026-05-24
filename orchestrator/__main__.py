@@ -258,6 +258,24 @@ async def run_cycle(
     symbol = await detect_symbol()
     mt5_path = env.get("MT5_PATH", "")
 
+    # For cent accounts: use standard symbol for data, cent suffix for trading
+    if symbol.endswith("c"):
+        data_symbol = symbol.rstrip("c")
+        trade_symbol = symbol
+        print(f"  [SYMBOL] Data: {data_symbol} | Trade: {trade_symbol}")
+    else:
+        data_symbol = symbol
+        trade_symbol = symbol
+
+    # Calculate daily loss limit (percentage or fixed)
+    if cfg.max_daily_loss_pct > 0 and balance > 0:
+        daily_loss_limit = balance * (cfg.max_daily_loss_pct / 100)
+    else:
+        daily_loss_limit = cfg.max_daily_loss
+
+    # Use trading config risk params
+    max_risk_pct = cfg.risk_per_trade_pct
+
     log = {"symbol": symbol, "timestamp": datetime.now().isoformat(), "session": session}
 
     print()
@@ -291,7 +309,7 @@ async def run_cycle(
     # ── Phase 1: Market Analysis ──────────────────────────
     print("\n[1/5] Collecting market analysis...")
     try:
-        analysis = await collect_all_analysis(symbol)
+        analysis = await collect_all_analysis(data_symbol)
         log["analysis_ok"] = True
     except Exception as e:
         print(f"  ERROR: {e}")
@@ -344,13 +362,17 @@ async def run_cycle(
     print("\n[3/5] Risk validation...")
     try:
         risk = await collect_risk_data(
-            symbol=symbol,
+            symbol=trade_symbol,
             balance=balance,
             equity=equity,
             margin_level=margin_level,
             bid=bid,
             ask=ask,
             point=0.01,
+            daily_loss_limit=daily_loss_limit,
+            max_spread_pips=cfg.max_spread_pips,
+            max_latency_ms=cfg.max_latency_ms,
+            blackout_minutes=cfg.blackout_minutes,
         )
         log["risk"] = risk
         print(f"  Overall:  {'APPROVED' if risk.get('overall_allowed') else 'BLOCKED'}")
@@ -423,7 +445,7 @@ async def run_cycle(
             lot_result = await call_tool(
                 MCPServers.METATRADER_EXT,
                 "tool_lot_fix",
-                {"lot_size": raw_lot, "symbol": symbol},
+                {"lot_size": raw_lot, "symbol": trade_symbol},
             )
             fixed_lot = lot_result.get("fixed_lot", raw_lot)
             lot_info = lot_result.get("constraints", {})
@@ -463,7 +485,7 @@ async def run_cycle(
                 MCPServers.LEARNING_SELF,
                 "tool_log_trading_journal",
                 {
-                    "symbol": symbol,
+                    "symbol": trade_symbol,
                     "direction": decision.direction,
                     "entry": decision.entry,
                     "sl": decision.sl,

@@ -23,10 +23,12 @@ CHoCH_WARNING = -0.5
 # Total max: 11 points (with all bonuses)
 
 MIN_SCORE_TO_TRADE = 6
-MIN_RR_RATIO = 1.5
-MAX_SL_POINTS = 30.0
+MIN_RR_RATIO = 1.2
+# SL/TP in PRICE UNITS (30 pips = 3.00 price movement, etc.)
+# Works for both 2-digit and 3-digit broker pricing
+MAX_SL_POINTS = 7.0
 MIN_SL_POINTS = 3.0
-MAX_TP_POINTS = 50.0
+MAX_TP_POINTS = 15.0
 
 
 @dataclass

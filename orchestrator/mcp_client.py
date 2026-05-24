@@ -79,6 +79,10 @@ async def collect_risk_data(
     bid: float = 0.0,
     ask: float = 0.0,
     point: float = 0.01,
+    daily_loss_limit: float = 100.0,
+    max_spread_pips: float = 3.0,
+    max_latency_ms: float = 300.0,
+    blackout_minutes: int = 10,
 ) -> dict:
     """Collect risk assessment from the risk guardrail server."""
     return await call_tool(
@@ -92,8 +96,10 @@ async def collect_risk_data(
             "bid": bid,
             "ask": ask,
             "point": point,
-            "max_spread_pips": 3.0,
-            "daily_loss_limit": 100.0,
+            "max_spread_pips": max_spread_pips,
+            "max_latency_ms": max_latency_ms,
+            "daily_loss_limit": daily_loss_limit,
+            "blackout_minutes": blackout_minutes,
         },
     )
 
